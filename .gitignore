@@ -1,0 +1,50 @@
+# ============================================================================
+# .gitignore — raiz do monorepo (cada app tem o seu também)
+# ============================================================================
+
+# Dependências
+node_modules/
+**/node_modules/
+.pnp
+.pnp.*
+
+# Build do Next.js
+.next/
+**/.next/
+out/
+**/out/
+build/
+**/build/
+
+# TypeScript
+*.tsbuildinfo
+**/*.tsbuildinfo
+next-env.d.ts
+**/next-env.d.ts
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Variáveis de ambiente
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+*.pem
+
+# Backup da versão antiga (gerado durante a refatoração)
+.backup-antigo/
+
+# Configurações locais do Claude Code (pessoais)
+.claude/
+
+# Documentos com dados pessoais — NÃO versionar (entregar só ao professor)
+/DOCUMENTACAO.pdf
+/INTEGRANTES.txt

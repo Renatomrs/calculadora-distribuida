@@ -1,0 +1,129 @@
+# ============================================================================
+# Calculadora Distribuída — orquestração dos containers (Docker Compose)
+#
+# Sobe 6 containers INDEPENDENTES:
+#   - frontend          → interface web (Next.js 16 + Tailwind)        :3000
+#   - servidor-central  → gateway/orquestrador (Next.js 16)            :4000
+#   - servico-soma            (microserviço)                           :4001
+#   - servico-subtracao       (microserviço)                           :4002
+#   - servico-multiplicacao   (microserviço)                           :4003
+#   - servico-divisao         (microserviço)                           :4004
+#
+# Todos ficam na mesma rede "calc-net", então cada serviço consegue chamar o
+# outro pelo NOME do container (ex.: http://servico-soma:4001).
+#
+# Tolerância a falhas: se um microserviço cair (docker stop ...), o servidor
+# central devolve um erro amigável e os DEMAIS continuam funcionando.
+# ============================================================================
+
+services:
+  # -------------------- Microserviços --------------------
+  servico-soma:
+    build: ./servico-soma
+    container_name: calc-soma
+    environment:
+      - PORT=4001
+    ports:
+      - "4001:4001"
+    networks:
+      - calc-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  servico-subtracao:
+    build: ./servico-subtracao
+    container_name: calc-subtracao
+    environment:
+      - PORT=4002
+    ports:
+      - "4002:4002"
+    networks:
+      - calc-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  servico-multiplicacao:
+    build: ./servico-multiplicacao
+    container_name: calc-multiplicacao
+    environment:
+      - PORT=4003
+    ports:
+      - "4003:4003"
+    networks:
+      - calc-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  servico-divisao:
+    build: ./servico-divisao
+    container_name: calc-divisao
+    environment:
+      - PORT=4004
+    ports:
+      - "4004:4004"
+    networks:
+      - calc-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  # -------------------- Servidor Central (gateway) --------------------
+  servidor-central:
+    build: ./servidor-central
+    container_name: calc-central
+    environment:
+      - PORT=4000
+      # Endereços dos microserviços DENTRO da rede do Docker (pelo nome).
+      - SOMA_URL=http://servico-soma:4001
+      - SUBTRACAO_URL=http://servico-subtracao:4002
+      - MULTIPLICACAO_URL=http://servico-multiplicacao:4003
+      - DIVISAO_URL=http://servico-divisao:4004
+    ports:
+      - "4000:4000"
+    depends_on:
+      - servico-soma
+      - servico-subtracao
+      - servico-multiplicacao
+      - servico-divisao
+    networks:
+      - calc-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  # -------------------- Interface Web --------------------
+  frontend:
+    build: ./frontend
+    container_name: calc-frontend
+    environment:
+      - PORT=3000
+      # Endereço do servidor central DENTRO da rede do Docker.
+      - CENTRAL_URL=http://servidor-central:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - servidor-central
+    networks:
+      - calc-net
+
+networks:
+  calc-net:
+    driver: bridge
