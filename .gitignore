@@ -48,3 +48,6 @@ Thumbs.db
 # Documentos com dados pessoais — NÃO versionar (entregar só ao professor)
 /DOCUMENTACAO.pdf
 /INTEGRANTES.txt
+
+# Versionar apenas o TEMPLATE de variáveis de ambiente (o .env real fica de fora)
+!/.env.example

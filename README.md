@@ -1,313 +1,156 @@
-# 🧮 Calculadora Distribuída com Microserviços e Docker
+# 🧮 Calculadora Distribuída — Servidor Central + Interface Web
 
 > **Projeto A3 — Sistemas Distribuídos**
-> Uma calculadora onde **cada operação matemática roda em um microserviço
-> independente**, em seu próprio container Docker. Os serviços conversam entre
-> si por **HTTP**. Se um serviço cair, **os demais continuam funcionando**.
+> Cada operação matemática roda em um **microserviço independente, em uma máquina
+> diferente**, e tudo se comunica por **HTTP**. Este repositório contém as duas
+> peças que ficam **na mesma máquina**: o **servidor central** (gateway/orquestrador)
+> e a **interface web** (frontend). Cada operação vive em seu próprio repositório.
 
 ---
 
-## ✨ Visão geral
+## 📦 Repositórios do sistema
 
-O sistema é dividido em **6 aplicações independentes** (cada uma em seu próprio
-container Docker):
-
-| # | Aplicação              | Papel                                             | Porta |
-|---|------------------------|---------------------------------------------------|-------|
-| 1 | **frontend**           | Interface Web (a calculadora que o usuário usa)   | 3000  |
-| 2 | **servidor-central**   | Gateway / orquestrador (decide quem faz a conta)  | 4000  |
-| 3 | **servico-soma**       | Microserviço de **soma** (`+`)                    | 4001  |
-| 4 | **servico-subtracao**  | Microserviço de **subtração** (`−`)               | 4002  |
-| 5 | **servico-multiplicacao** | Microserviço de **multiplicação** (`×`)        | 4003  |
-| 6 | **servico-divisao**    | Microserviço de **divisão** (`÷`)                 | 4004  |
-
-Todas as aplicações foram feitas em **Next.js 16** (App Router) com
-**TypeScript**, **ESLint**, **alias `@`** e a pasta **`src/`**. O frontend usa
-**Tailwind CSS v4**.
+| Componente | Repositório | Porta |
+|---|---|---|
+| **Servidor central + frontend** (este) | `calculadora-distribuida` | 4000 / 3000 |
+| Microserviço de **soma** | [`servico-soma`](https://github.com/Renatomrs/servico-soma) | 4001 |
+| Microserviço de **subtração** | [`servico-subtracao`](https://github.com/Renatomrs/servico-subtracao) | 4002 |
+| Microserviço de **multiplicação** | [`servico-multiplicacao`](https://github.com/Renatomrs/servico-multiplicacao) | 4003 |
+| Microserviço de **divisão** | [`servico-divisao`](https://github.com/Renatomrs/servico-divisao) | 4004 |
 
 ---
 
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura distribuída
 
 ```
-              ┌──────────────────────────────────────────────────────────┐
-              │                     NAVEGADOR (usuário)                    │
-              └───────────────────────────┬──────────────────────────────┘
-                                          │  HTTP  (localhost:3000)
-                                          ▼
-              ┌──────────────────────────────────────────────────────────┐
-              │  FRONTEND  (Next.js 16 + Tailwind)            :3000        │
-              │  Interface web + proxy /api → servidor central            │
-              └───────────────────────────┬──────────────────────────────┘
-                                          │  HTTP  (servidor-central:4000)
-                                          ▼
-              ┌──────────────────────────────────────────────────────────┐
-              │  SERVIDOR CENTRAL  (gateway / orquestrador)   :4000        │
-              │  /api/calcular  → escolhe o microserviço e repassa        │
-              │  /api/status    → verifica quem está vivo                 │
-              └───┬───────────────┬───────────────┬───────────────┬───────┘
-                  │ HTTP          │ HTTP          │ HTTP          │ HTTP
-                  ▼               ▼               ▼               ▼
-            ┌──────────┐   ┌────────────┐  ┌──────────────┐  ┌───────────┐
-            │  SOMA    │   │ SUBTRAÇÃO  │  │MULTIPLICAÇÃO │  │  DIVISÃO  │
-            │  :4001   │   │   :4002    │  │    :4003     │  │   :4004   │
-            └──────────┘   └────────────┘  └──────────────┘  └───────────┘
-              microserviços independentes — cada um em seu container
+   Máquina CENTRAL                          Máquinas de OPERAÇÃO (uma cada)
+ ┌─────────────────────────┐
+ │  Navegador              │
+ │     │ HTTP :3000        │              ┌───────────────────────┐
+ │     ▼                   │   HTTP ───▶  │  servico-soma   :4001  │  (máquina 2)
+ │  Frontend  :3000        │   (IP)       └───────────────────────┘
+ │     │ rede "calc"       │              ┌───────────────────────┐
+ │     ▼                   │   HTTP ───▶  │  servico-subtracao     │  (máquina 3)
+ │  Servidor Central :4000 │──────────▶   │                 :4002  │
+ │     (lê os IPs do .env) │   (IP)       └───────────────────────┘
+ └─────────────────────────┘              ┌───────────────────────┐
+                              HTTP ───▶    │  servico-multiplicacao │  (máquina 4)
+                              (IP)         │                 :4003  │
+                                           └───────────────────────┘
+                                           ┌───────────────────────┐
+                              HTTP ───▶    │  servico-divisao :4004 │  (máquina 5)
+                              (IP)         └───────────────────────┘
 ```
 
-**Fluxo de uma conta** (ex.: `10 ÷ 5`):
-
-1. O navegador chama `GET /api/calcular?op=divisao&a=10&b=5` no **frontend**.
-2. O frontend repassa (server-side) a chamada para o **servidor central**.
-3. O servidor central identifica a operação `divisao` e chama, via HTTP,
-   o microserviço correspondente: `GET http://servico-divisao:4004/api/operar?a=10&b=5`.
-4. O microserviço de divisão calcula `2` e devolve o JSON.
-5. A resposta volta pelo mesmo caminho até a tela.
-
-> Cada microserviço **só conhece a sua própria operação**. O servidor central é
-> o único que conhece o endereço de todos eles (definido por variáveis de
-> ambiente no `docker-compose.yml`).
+O servidor central descobre **cada microserviço por IP**, lido do arquivo `.env`.
+Frontend e central ficam na mesma máquina e conversam por uma rede Docker (`calc`).
 
 ---
 
 ## ✅ Pré-requisitos
 
-Para rodar via Docker (forma recomendada), você só precisa de:
-
-- **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** (inclui o `docker compose`).
-
-Para rodar localmente sem Docker (opcional):
-
-- **Node.js 20 ou superior** (recomendado Node 22 LTS).
+- **Docker** (linha de comando). No laboratório Debian, basta o `docker` no terminal
+  — **não** é necessário Docker Desktop nem `docker compose`.
 
 ---
 
-## 🚀 Como executar o sistema (Docker — recomendado)
+## 🚀 Como executar (Docker CLI)
 
-Na raiz do projeto (onde está o `docker-compose.yml`):
+### 1) Em cada máquina de operação
+Em **4 máquinas diferentes**, suba um microserviço cada. Exemplo (soma):
 
 ```bash
-# 1) Constrói as imagens e sobe os 6 containers
-docker compose up --build
+git clone https://github.com/Renatomrs/servico-soma.git
+cd servico-soma
+docker build -t soma .
+docker run -d --name soma -p 4001:4001 soma
+hostname -I        # ANOTE o IP desta máquina
 ```
 
-Aguarde o build terminar (na primeira vez demora alguns minutos). Quando
-aparecerem os logs dos serviços, abra no navegador:
+Repita nas outras com: `servico-subtracao` (4002), `servico-multiplicacao` (4003)
+e `servico-divisao` (4004). Cada repositório tem o seu README com os comandos.
 
+### 2) Na máquina central (este repositório)
+
+```bash
+git clone https://github.com/Renatomrs/calculadora-distribuida.git
+cd calculadora-distribuida
+
+# rede para o frontend e o central conversarem nesta máquina
+docker network create calc
+
+# informe os IPs das 4 máquinas de operação
+cp .env.example .env
+nano .env          # troque os IPs pelos reais (os que você anotou)
+
+# servidor central (lê os IPs do .env)
+docker build -t central ./servidor-central
+docker run -d --name central --network calc -p 4000:4000 --env-file .env central
+
+# frontend (fala com o central pela rede "calc")
+docker build -t frontend ./frontend
+docker run -d --name frontend --network calc -p 3000:3000 -e CENTRAL_URL=http://central:4000 frontend
 ```
+
+Abra **http://localhost:3000** (ou `http://IP_DA_CENTRAL:3000` de outro computador).
+
+#### Conteúdo do `.env`
+```bash
+SOMA_URL=http://IP_DA_SOMA:4001
+SUBTRACAO_URL=http://IP_DA_SUB:4002
+MULTIPLICACAO_URL=http://IP_DA_MULT:4003
+DIVISAO_URL=http://IP_DA_DIV:4004
+```
+
+---
+
+## 🧪 Como testar
+
+```bash
+# pela interface
 http://localhost:3000
-```
 
-Para subir em segundo plano (sem prender o terminal):
+# central direto (escolhe o microserviço e repassa)
+curl "http://localhost:4000/api/calcular?op=soma&a=10&b=5"
 
-```bash
-docker compose up --build -d
-docker compose ps          # ver o status de cada container
-docker compose logs -f     # acompanhar os logs
-```
-
-Para **parar tudo**:
-
-```bash
-docker compose down
-```
-
----
-
-## 🧪 Como testar os serviços
-
-### 1. Pela interface web
-
-Abra **http://localhost:3000**, digite dois números, escolha a operação e
-clique em **Calcular**. O painel superior mostra, em tempo real, quais
-microserviços estão **online/offline**.
-
-### 2. Testando cada microserviço direto (HTTP)
-
-Cada microserviço responde de forma independente. Abra no navegador ou use
-`curl`:
-
-```bash
-# Soma: 10 + 5
-curl "http://localhost:4001/api/operar?a=10&b=5"
-# → {"servico":"soma","operacao":"+","a":10,"b":5,"resultado":15}
-
-# Subtração: 10 - 5
-curl "http://localhost:4002/api/operar?a=10&b=5"
-
-# Multiplicação: 10 * 5
-curl "http://localhost:4003/api/operar?a=10&b=5"
-
-# Divisão: 10 / 5
-curl "http://localhost:4004/api/operar?a=10&b=5"
-
-# Healthcheck de qualquer serviço
-curl "http://localhost:4001/api/health"
-# → {"servico":"soma","status":"ok","timestamp":"..."}
-```
-
-### 3. Testando o servidor central (gateway)
-
-```bash
-# O central decide qual microserviço chamar:
-curl "http://localhost:4000/api/calcular?op=multiplicacao&a=7&b=8"
-# → {"servico":"multiplicacao","operacao":"×","a":7,"b":8,"resultado":56}
-
-# Status de todos os microserviços de uma vez:
+# status consolidado dos serviços
 curl "http://localhost:4000/api/status"
-# → {"soma":true,"subtracao":true,"multiplicacao":true,"divisao":true}
-```
-
-### 4. Casos especiais já tratados
-
-```bash
-# Divisão por zero → erro amigável (HTTP 400)
-curl "http://localhost:4004/api/operar?a=10&b=0"
-# → {"erro":"Não é possível dividir por zero."}
-
-# Parâmetros inválidos → erro (HTTP 400)
-curl "http://localhost:4001/api/operar?a=abc&b=5"
-# → {"erro":"Parâmetros inválidos. Use ?a=NUMERO&b=NUMERO"}
 ```
 
 ---
 
-## 🛡️ Tolerância a falhas (demonstração)
+## 🛡️ Tolerância a falhas
 
-A regra do projeto: **se um serviço cair, os demais continuam funcionando**.
-Veja como demonstrar isso ao vivo:
-
-### Cenário A — derrubar um microserviço
+Em qualquer máquina de operação, derrube o serviço:
 
 ```bash
-# Com o sistema rodando, derrube SOMENTE a divisão:
-docker stop calc-divisao
+docker stop soma      # o painel marca "Soma offline"; os demais continuam
+docker start soma     # volta ao ar
 ```
 
-- Em até ~3 segundos, o painel em **http://localhost:3000** marca **Divisão =
-  offline** (bolinha vermelha).
-- **Soma, subtração e multiplicação continuam funcionando normalmente.**
-- Se você tentar uma divisão, recebe uma mensagem amigável
-  *"Serviço de Divisão indisponível no momento."* — **o sistema não quebra**.
-
-Para trazer o serviço de volta:
-
-```bash
-docker start calc-divisao
-```
-
-Em poucos segundos o painel volta a marcar **Divisão = online**.
-
-### Cenário B — derrubar o próprio servidor central
-
-```bash
-docker stop calc-central
-```
-
-- O frontend detecta e mostra **Servidor Central · offline**.
-- A interface **continua no ar** (não dá tela branca / não trava).
-
-```bash
-docker start calc-central
-```
-
-### Por que funciona? (a lógica da tolerância)
-
-- O servidor central chama cada microserviço com **timeout** (`AbortController`)
-  e **`try/catch`**. Se o serviço não responder, ele devolve um **HTTP 503** com
-  `{"offline": true}` em vez de estourar um erro.
-- A rota `/api/status` checa cada serviço **em paralelo e isoladamente**: um
-  serviço offline vira apenas `false`, sem afetar os outros.
-- Como cada serviço roda em **container independente**, a falha de um **não
-  derruba** os demais — eles nem ficam sabendo.
+O central chama cada microserviço com **timeout + tratamento de erro**, então a
+queda de um **não derruba** o sistema — os outros seguem funcionando.
 
 ---
 
-## 💻 Abrindo o projeto no VS Code
-
-O jeito mais prático é abrir o **workspace** já configurado:
-
-1. Abra o VS Code.
-2. **File → Open Workspace from File…** e selecione
-   `calculadora-distribuida.code-workspace`.
-3. Aceite instalar as extensões recomendadas (ESLint, Tailwind CSS, Prettier,
-   Docker).
-
-O workspace já vem com **format on save**, **ESLint** e o **alias `@`**
-funcionando em todos os apps (cada um tem o seu `tsconfig.json` com
-`"@/*": ["./src/*"]`).
-
----
-
-## 🧰 Rodando localmente sem Docker (opcional)
-
-Cada aplicação é um projeto Next.js independente. Em **6 terminais** separados
-(ou use o Docker, é bem mais simples):
+## 🔧 Comandos Docker úteis
 
 ```bash
-# Microserviços
-cd servico-soma          && npm install && npm run dev   # :4001
-cd servico-subtracao     && npm install && npm run dev   # :4002
-cd servico-multiplicacao && npm install && npm run dev   # :4003
-cd servico-divisao       && npm install && npm run dev   # :4004
-
-# Servidor central
-cd servidor-central      && npm install && npm run dev   # :4000
-
-# Frontend
-cd frontend              && npm install && npm run dev   # :3000
+docker ps                 # containers rodando (-a inclui parados)
+docker logs NOME          # ver logs/erros
+docker stop NOME          # parar
+docker start NOME         # ligar
+docker rm -f NOME         # remover (forçado)
+hostname -I               # IP da máquina (Debian)
 ```
-
-Sem variáveis de ambiente, cada serviço cai no `localhost` certo por padrão
-(ex.: o central procura a soma em `http://localhost:4001`). Abra
-`http://localhost:3000`.
 
 ---
 
-## 📂 Estrutura de pastas
+## 💻 Testar tudo numa máquina só (opcional)
 
-```
-calculadora-distribuida/
-├── docker-compose.yml                 # orquestra os 6 containers
-├── README.md                          # este arquivo
-├── calculadora-distribuida.code-workspace
-│
-├── frontend/                          # Interface Web (Next.js 16 + Tailwind)
-│   ├── Dockerfile
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx               # a calculadora (UI)
-│       │   ├── layout.tsx
-│       │   ├── globals.css
-│       │   └── api/
-│       │       ├── calcular/route.ts  # proxy → servidor central
-│       │       └── status/route.ts    # proxy → servidor central
-│       └── lib/central.ts             # endereço do servidor central
-│
-├── servidor-central/                  # Gateway / orquestrador (Next.js 16)
-│   ├── Dockerfile
-│   └── src/
-│       ├── app/
-│       │   ├── route.ts               # info do serviço (JSON)
-│       │   └── api/
-│       │       ├── calcular/route.ts  # escolhe o microserviço e repassa
-│       │       └── status/route.ts    # verifica quem está vivo
-│       └── lib/servicos.ts            # registro + fetch com timeout
-│
-└── servico-soma/                      # Microserviço (idêntico p/ as 4 operações)
-    ├── Dockerfile
-    └── src/
-        ├── app/
-        │   ├── route.ts               # info do serviço (JSON)
-        │   └── api/
-        │       ├── operar/route.ts    # faz a conta
-        │       └── health/route.ts    # healthcheck
-        └── lib/operacao.ts            # a operação (a única coisa que muda)
-```
-
-> `servico-subtracao`, `servico-multiplicacao` e `servico-divisao` têm
-> exatamente a mesma estrutura de `servico-soma`. A única diferença é o arquivo
-> `src/lib/operacao.ts` (a operação) e a porta.
+Para testar antes do laboratório, suba os 4 serviços nesta mesma máquina (portas
+4001–4004) e, no `.env`, use o **IP desta máquina** (ou `host.docker.internal` no
+Docker Desktop) em vez de IPs diferentes.
 
 ---
 
@@ -316,29 +159,6 @@ calculadora-distribuida/
 - **Next.js 16** (App Router, Route Handlers, saída `standalone`)
 - **React 19** · **TypeScript 5** · **ESLint 9**
 - **Tailwind CSS v4** (frontend)
-- **Docker** + **Docker Compose**
-- **Node.js 22** (imagem base dos containers)
+- **Docker** (CLI) · **Node.js 22**
 
-Detalhes pedidos no enunciado e atendidos: pasta **`src/`**, **alias `@`**
-(`@/lib/...`, `@/app/...`), **ESLint** e **TypeScript** em todos os apps.
-
----
-
-## 📋 Comandos úteis (resumo)
-
-```bash
-docker compose up --build       # sobe tudo (build + run)
-docker compose up --build -d    # sobe em segundo plano
-docker compose ps               # status dos containers
-docker compose logs -f          # logs ao vivo
-docker stop calc-divisao        # derruba 1 serviço (teste de falha)
-docker start calc-divisao       # religa o serviço
-docker compose down             # derruba tudo
-```
-
----
-
-## 👥 Autoria
-
-Projeto acadêmico desenvolvido para a disciplina de Sistemas Distribuídos (A3).
-Os dados do grupo são entregues separadamente ao professor.
+Convenções: pasta `src/`, alias `@` (`@/lib/...`), ESLint e TypeScript em todos os apps.
